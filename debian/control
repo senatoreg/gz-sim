@@ -1,0 +1,93 @@
+Source: gz-sim
+Section: libs
+Priority: optional
+Maintainer: Giovanni Senatore <giovanni.senatore@gmail.com>
+Rules-Requires-Root: no
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ gz-cmake,
+ libsdformat-dev,
+ libgz-plugin-dev,
+ libgz-transport-dev,
+ libgz-msgs-dev,
+ libgz-common-dev,
+ libgz-fuel-tools-dev,
+ libgz-gui-dev,
+ libgz-physics-dev,
+ libgz-sensors-dev,
+ libgz-rendering-dev,
+ libgz-math-dev,
+ gz-tools,
+ libgz-utils-dev,
+ qtbase5-dev | qtbase5-gles-dev,
+ qtdeclarative5-dev,
+ qtquickcontrols2-5-dev,
+ libprotobuf-dev,
+ python3-all,
+ python3-pybind11,
+ x11-utils,
+ mesa-utils | mesa-utils-bin,
+ doxygen,
+ graphviz,
+ libjsoncpp-dev,
+ libtinyxml2-dev,
+Standards-Version: 4.6.2
+Homepage: http://gazebosim.org/
+#Vcs-Browser: https://salsa.debian.org/debian/gz-sim
+#Vcs-Git: https://salsa.debian.org/debian/gz-sim.git
+
+Package: libgz-sim-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends:
+ libgz-sim9 (= ${binary:Version}),
+ ${misc:Depends},
+Description: Open source robotics simulator - development files
+ Gazebo Sim is an open source robotics simulator. Through Gazebo Sim, users have
+ access to high fidelity physics, rendering, and sensor models. Additionally,
+ users and developers have multiple points of entry to simulation including a
+ graphical user interface, plugins, and asynchronous message passing and services.
+
+Package: libgz-sim9
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Open source robotics simulator
+ Gazebo Sim is an open source robotics simulator. Through Gazebo Sim, users have
+ access to high fidelity physics, rendering, and sensor models. Additionally,
+ users and developers have multiple points of entry to simulation including a
+ graphical user interface, plugins, and asynchronous message passing and services.
+
+Package: python3-gz-sim
+Section: python
+Architecture: any
+Multi-Arch: same
+Depends:
+ libgz-sim9 (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Open source robotics simulator
+ Gazebo Sim is an open source robotics simulator. Through Gazebo Sim, users have
+ access to high fidelity physics, rendering, and sensor models. Additionally,
+ users and developers have multiple points of entry to simulation including a
+ graphical user interface, plugins, and asynchronous message passing and services.
+
+Package: ruby-gz-sim
+Section: python
+Architecture: any
+Multi-Arch: same
+Depends:
+ ruby,
+ libgz-sim9 (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Open source robotics simulator
+ Gazebo Sim is an open source robotics simulator. Through Gazebo Sim, users have
+ access to high fidelity physics, rendering, and sensor models. Additionally,
+ users and developers have multiple points of entry to simulation including a
+ graphical user interface, plugins, and asynchronous message passing and services.
