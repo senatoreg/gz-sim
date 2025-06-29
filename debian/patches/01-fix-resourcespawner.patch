@@ -1,0 +1,12 @@
+diff --git a/src/gui/plugins/resource_spawner/ResourceSpawner.qml b/src/gui/plugins/resource_spawner/ResourceSpawner.qml
+index 3ca3921ab..e4f128474 100644
+--- a/src/gui/plugins/resource_spawner/ResourceSpawner.qml
++++ b/src/gui/plugins/resource_spawner/ResourceSpawner.qml
+@@ -183,7 +183,6 @@ Rectangle {
+                   gridView.currentIndex = -1
+                   mouse.accepted = false
+                   treeView.selection.select(styleData.index, ItemSelectionModel.ClearAndSelect)
+-                  treeView2.selection.clearSelection()
+                 }
+               }
+ 
