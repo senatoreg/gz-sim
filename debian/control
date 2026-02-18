@@ -42,7 +42,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends:
- libgz-sim9 (= ${binary:Version}),
+ libgz-sim10 (= ${binary:Version}),
  ${misc:Depends},
 Description: Open source robotics simulator - development files
  Gazebo Sim is an open source robotics simulator. Through Gazebo Sim, users have
@@ -50,7 +50,7 @@ Description: Open source robotics simulator - development files
  users and developers have multiple points of entry to simulation including a
  graphical user interface, plugins, and asynchronous message passing and services.
 
-Package: libgz-sim9
+Package: libgz-sim10
 Section: libdevel
 Architecture: any
 Multi-Arch: same
@@ -68,7 +68,7 @@ Section: python
 Architecture: any
 Multi-Arch: same
 Depends:
- libgz-sim9 (= ${binary:Version}),
+ libgz-sim10 (= ${binary:Version}),
  ${shlibs:Depends},
  ${misc:Depends},
 Description: Open source robotics simulator
@@ -83,7 +83,7 @@ Architecture: any
 Multi-Arch: same
 Depends:
  ruby,
- libgz-sim9 (= ${binary:Version}),
+ libgz-sim10 (= ${binary:Version}),
  ${shlibs:Depends},
  ${misc:Depends},
 Description: Open source robotics simulator
