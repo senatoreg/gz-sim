@@ -890,7 +890,7 @@ const common::Mesh *loadMesh(const sdf::Mesh &_meshSdf)
   if (mesh && _meshSdf.Optimization() != sdf::MeshOptimization::NONE)
   {
     const common::Mesh *optimizedMesh = optimizeMesh(_meshSdf, *mesh);
-    if (optimizedMesh)
+    if (optimizedMesh && optimizedMesh->SubMeshCount() > 0u)
       return optimizedMesh;
     else
       gzwarn << "Failed to optimize Mesh " << mesh->Name() << std::endl;
@@ -1020,6 +1020,17 @@ math::AxisAlignedBox transformAxisAlignedBox(
     _pose.CoordPositionAdd(_aabb.Min()),
     _pose.CoordPositionAdd(_aabb.Max())
   );
+}
+
+const std::string &staticPluginPrefixStr()
+{
+  return kStaticPluginFilenamePrefix;
+}
+
+bool isStaticPlugin(const std::string &_filename)
+{
+  return _filename.substr(0, staticPluginPrefixStr().size()) ==
+        staticPluginPrefixStr();
 }
 
 }

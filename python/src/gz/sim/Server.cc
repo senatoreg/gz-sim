@@ -31,7 +31,10 @@ namespace python
 void defineSimServer(pybind11::object module)
 {
   pybind11::class_<gz::sim::Server,
-    std::shared_ptr<gz::sim::Server>>(module, "Server")
+    std::shared_ptr<gz::sim::Server>>(module, "Server",
+    "The main simuulation server class. This class manages the simulation "
+    "execution and provides control over running, pausing, and stepping "
+    "through simulations.")
   .def(pybind11::init<gz::sim::ServerConfig &>())
   .def(
     "run", &gz::sim::Server::Run,
@@ -46,7 +49,11 @@ void defineSimServer(pybind11::object module)
   .def(
     "is_running",
     pybind11::overload_cast<>(&gz::sim::Server::Running, pybind11::const_),
-    "Get whether the server is running.");
+    "Get whether the server is running.")
+  .def("reset_all", &gz::sim::Server::ResetAll,
+    "Resets all simulation runners under this server.")
+  .def("reset", &gz::sim::Server::Reset,
+    "Resets a specific simulation runner under this server.");
 }
 }  // namespace python
 }  // namespace sim

@@ -18,11 +18,14 @@
 #include "SimulationRunner.hh"
 
 #include <algorithm>
+#include <memory>
+#include <ostream>
 #include <unordered_set>
 #ifdef HAVE_PYBIND11
 #include <pybind11/pybind11.h>
 #endif
 
+#include <gz/math/Vector3.hh>
 #include <gz/msgs/boolean.pb.h>
 #include <gz/msgs/clock.pb.h>
 #include <gz/msgs/gui.pb.h>
@@ -33,6 +36,7 @@
 #include <gz/msgs/world_control_state.pb.h>
 #include <gz/msgs/world_stats.pb.h>
 
+#include <sdf/Physics.hh>
 #include <sdf/Root.hh>
 #include <vector>
 
@@ -43,6 +47,7 @@
 #include "gz/sim/components/Sensor.hh"
 #include "gz/sim/components/Visual.hh"
 #include "gz/sim/components/World.hh"
+#include "gz/sim/components/Gravity.hh"
 #include "gz/sim/components/ParentEntity.hh"
 #include "gz/sim/components/Physics.hh"
 #include "gz/sim/components/PhysicsCmd.hh"
@@ -51,12 +56,14 @@
 #include "gz/sim/components/RenderEngineGuiPlugin.hh"
 #include "gz/sim/components/RenderEngineServerHeadless.hh"
 #include "gz/sim/components/RenderEngineServerPlugin.hh"
+#include "gz/sim/Conversions.hh"
 #include "gz/sim/Events.hh"
 #include "gz/sim/ServerConfig.hh"
 #include "gz/sim/SdfEntityCreator.hh"
 #include "gz/sim/Util.hh"
 #include "gz/transport/TopicUtils.hh"
 #include "network/NetworkManagerPrimary.hh"
+#include "LevelManager.hh"
 #include "SdfGenerator.hh"
 
 using namespace gz;
@@ -99,7 +106,8 @@ struct MaybeGilScopedRelease
 //////////////////////////////////////////////////
 SimulationRunner::SimulationRunner(const sdf::World &_world,
                                    const SystemLoaderPtr &_systemLoader,
-                                   const ServerConfig &_config)
+                                   const ServerConfig &_config,
+                                   const bool _createEntities)
   : sdfWorld(_world), serverConfig(_config)
 {
   // Keep world name
@@ -256,7 +264,12 @@ SimulationRunner::SimulationRunner(const sdf::World &_world,
   this->levelMgr = std::make_unique<LevelManager>(this,
       this->serverConfig.UseLevels());
 
-  this->CreateEntities(_world);
+  if (_createEntities)
+  {
+    this->SetWorldSdf(_world);
+    this->SetCreateEntities();
+    this->CreateEntities();
+  }
 
   // TODO(louise) Combine both messages into one.
   this->node->Advertise("control", &SimulationRunner::OnWorldControl, this);
@@ -398,10 +411,26 @@ void SimulationRunner::UpdatePhysicsParams()
   {
     return;
   }
+  const auto& physicsParams = physicsCmdComp->Data();
+
+  auto gravityComp =
+    this->entityCompMgr.Component<components::Gravity>(worldEntity);
+  if (gravityComp)
+  {
+    const  gz::math::Vector3<double>  newGravity =
+    {
+        physicsParams.gravity().x(),
+        physicsParams.gravity().y(),
+        physicsParams.gravity().z()
+    };
+    gravityComp->Data() = newGravity;
+    this->entityCompMgr.SetChanged(worldEntity, components::Gravity::typeId,
+          ComponentState::OneTimeChange);
+  }
+
   auto physicsComp =
     this->entityCompMgr.Component<components::Physics>(worldEntity);
 
-  const auto& physicsParams = physicsCmdComp->Data();
   const auto newStepSize =
     std::chrono::duration<double>(physicsParams.max_step_size());
   const double newRTF = physicsParams.real_time_factor();
@@ -680,6 +709,13 @@ bool SimulationRunner::Run(const uint64_t _iterations)
   // in the design.
   GZ_PROFILE_THREAD_NAME("SimulationRunner");
 
+  if (this->exitedWithErrors)
+  {
+    gzwarn << "SimulationRunner cannot run because it previously exited with "
+           << "errors." << std::endl;
+    return false;
+  }
+
   // Initialize network communications.
   if (this->networkMgr)
   {
@@ -703,11 +739,6 @@ bool SimulationRunner::Run(const uint64_t _iterations)
   // runner is not paused.
   if (!this->currentInfo.paused)
     this->realTimeWatch.Start();
-
-  // Variables for time keeping.
-  std::chrono::steady_clock::time_point startTime;
-  std::chrono::steady_clock::duration sleepTime;
-  std::chrono::steady_clock::duration actualSleep;
 
   this->running = true;
 
@@ -792,41 +823,44 @@ bool SimulationRunner::Run(const uint64_t _iterations)
   // Keep number of iterations requested by caller
   uint64_t processedIterations{0};
 
+  // Force a wait on asset creation if the number of requested iterations
+  // is greater than zero. We want to wait if the iterations are greater
+  // than zero because the user has indicated a specific number of steps
+  // to take with all assets.
+  if (_iterations > 0)
+  {
+    bool created = this->entitiesCreated;
+    while(!created && this->running)
+    {
+      {
+        std::unique_lock<std::mutex> createLock(this->assetCreationMutex);
+        created = this->creationCv.wait_for(createLock,
+          std::chrono::milliseconds(200),
+          [this]{return this->entitiesCreated;});
+      }
+
+      if (!created && this->createEntities)
+        this->CreateEntities();
+    }
+  }
+
   // Execute all the systems until we are told to stop, or the number of
   // iterations is reached.
+  auto nextUpdateTime = std::chrono::steady_clock::now() + this->updatePeriod;
   while (this->running && (_iterations == 0 ||
        processedIterations < _iterations))
   {
+    // Create entities if set. This needs to be called before updating
+    // the systems.
+    if (this->createEntities)
+    {
+      this->CreateEntities();
+    }
+
     GZ_PROFILE("SimulationRunner::Run - Iteration");
 
     // Update the step size and desired rtf
     this->UpdatePhysicsParams();
-
-    // Compute the time to sleep in order to match, as closely as possible,
-    // the update period.
-    sleepTime = 0ns;
-    actualSleep = 0ns;
-
-    sleepTime = std::max(0ns, this->prevUpdateRealTime +
-        this->updatePeriod - std::chrono::steady_clock::now() -
-        this->sleepOffset);
-
-    // Only sleep if needed.
-    if (sleepTime > 0ns)
-    {
-      GZ_PROFILE("Sleep");
-      // Get the current time, sleep for the duration needed to match the
-      // updatePeriod, and then record the actual time slept.
-      startTime = std::chrono::steady_clock::now();
-      std::this_thread::sleep_for(sleepTime);
-      actualSleep = std::chrono::steady_clock::now() - startTime;
-    }
-
-    // Exponentially average out the difference between expected sleep time
-    // and actual sleep time.
-    this->sleepOffset =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          (actualSleep - sleepTime) * 0.01 + this->sleepOffset * 0.99);
 
     // Update time information. This will update the iteration count, RTF,
     // and other values.
@@ -862,6 +896,59 @@ bool SimulationRunner::Run(const uint64_t _iterations)
     }
 
     this->resetInitiated = false;
+
+    // Only sleep when not paused.
+    if (!this->currentInfo.paused)
+    {
+      // A hybrid sleep/busy-wait strategy is used for precise timing. A simple
+      // sleep can suffer from wake-up latency due to CPU power-saving states
+      // (C-states), which causes RTF to undershoot. This strategy sleeps for
+      // long waits but busy-waits for the final moments to ensure precision.
+      // The threshold is a conservative value based on typical C-state
+      // latencies.
+      using namespace std::chrono_literals;
+
+      // Threshold at which we switch from sleeping to spinning. This should be
+      // larger than the typical OS + CPU C-state latency.
+      constexpr auto kSpinThreshold = 200us;
+
+      // If the scheduled update time is in the future...
+      if (nextUpdateTime > std::chrono::steady_clock::now())
+      {
+        // ...sleep until we are close to the target time.
+        auto sleepTarget = nextUpdateTime - kSpinThreshold;
+        if (sleepTarget > std::chrono::steady_clock::now())
+        {
+          std::this_thread::sleep_until(sleepTarget);
+        }
+
+        // ...then busy-wait for the final moments for precision.
+        while (std::chrono::steady_clock::now() < nextUpdateTime)
+        {
+          // Spin.
+        }
+      }
+
+      // Schedule the next update time.
+      auto now = std::chrono::steady_clock::now();
+      nextUpdateTime += this->updatePeriod;
+      if (nextUpdateTime < now)
+      {
+        nextUpdateTime = now + this->updatePeriod;
+      }
+    }
+    else
+    {
+      // We still need a small sleep to prevent this loop from spinning
+      // at 100% CPU when paused.
+      using namespace std::chrono_literals;
+      std::this_thread::sleep_for(1ms);
+
+      // When paused, pre-schedule the next update time for the near future.
+      // This ensures that when the simulation is un-paused, the first step
+      // has a valid schedule to meet, preventing a jump in RTF.
+      nextUpdateTime = std::chrono::steady_clock::now() + this->updatePeriod;
+    }
   }
 
   this->running = false;
@@ -875,15 +962,23 @@ void SimulationRunner::Step(const UpdateInfo &_info)
   GZ_PROFILE("SimulationRunner::Step");
   this->currentInfo = _info;
 
+  // The Run method does not check for entity creation each iteration
+  // on network secondaries, so check here to ensure that performers
+  // have parents assigned.
+  if (this->networkMgr && this->networkMgr->IsSecondary())
+  {
+    if (this->createEntities)
+    {
+      this->CreateEntities();
+    }
+  }
+
   // Process new ECM state information, typically sent from the GUI after
   // a change was made to the GUI's ECM.
   this->ProcessNewWorldControlState();
 
   // Publish info
   this->PublishStats();
-
-  // Record when the update step starts.
-  this->prevUpdateRealTime = std::chrono::steady_clock::now();
 
   this->levelMgr->UpdateLevelsState();
 
@@ -925,7 +1020,7 @@ void SimulationRunner::Step(const UpdateInfo &_info)
   // Process world control messages.
   this->ProcessMessages();
 
-  // Clear all new entities
+  // Clear all new entities..
   this->entityCompMgr.ClearNewlyCreatedEntities();
 
   // Recreate any entities that have the Recreate component
@@ -1187,6 +1282,14 @@ bool SimulationRunner::OnWorldControl(const msgs::WorldControl &_req,
 bool SimulationRunner::OnWorldControlState(const msgs::WorldControlState &_req,
     msgs::Boolean &_res)
 {
+  if (this->exitedWithErrors)
+  {
+    gzwarn << "Ignoring world control request because the simulation "
+              "has exited with errors." << std::endl;
+    _res.set_data(false);
+    return true;
+  }
+
   std::lock_guard<std::mutex> lock(this->msgBufferMutex);
 
   // Copy the state information if it exists
@@ -1441,6 +1544,12 @@ void SimulationRunner::SetStepSize(
 }
 
 /////////////////////////////////////////////////
+void SimulationRunner::SetExitedWithErrors()
+{
+  this->exitedWithErrors = true;
+}
+
+/////////////////////////////////////////////////
 bool SimulationRunner::HasEntity(const std::string &_name) const
 {
   bool result = false;
@@ -1552,9 +1661,33 @@ void SimulationRunner::SetNextStepAsBlockingPaused(const bool value)
 }
 
 //////////////////////////////////////////////////
-void SimulationRunner::CreateEntities(const sdf::World &_world)
+void SimulationRunner::SetWorldSdf(const sdf::World &_world)
 {
+  std::scoped_lock<std::mutex> createLock(this->assetCreationMutex);
   this->sdfWorld = _world;
+}
+
+//////////////////////////////////////////////////
+const sdf::World &SimulationRunner::WorldSdf() const
+{
+  return this->sdfWorld;
+}
+
+//////////////////////////////////////////////////
+void SimulationRunner::SetCreateEntities()
+{
+  std::scoped_lock<std::mutex> createLock(this->assetCreationMutex);
+  this->createEntities = true;
+}
+
+void SimulationRunner::CreateEntities()
+{
+  std::scoped_lock<std::mutex> createLock(this->assetCreationMutex);
+  if (!this->createEntities)
+  {
+    gzerr << "Need to call SetCreateEntites before CreateEntities\n";
+    return;
+  }
 
   // Instantiate the SDF creator
   auto creator = std::make_unique<SdfEntityCreator>(this->entityCompMgr,
@@ -1668,4 +1801,22 @@ void SimulationRunner::CreateEntities(const sdf::World &_world)
 
   // Store the initial state of the ECM;
   this->initialEntityCompMgr.CopyFrom(this->entityCompMgr);
+
+  this->createEntities = false;
+  this->entitiesCreated = true;
+  this->creationCv.notify_all();
+}
+
+/////////////////////////////////////////////////
+void SimulationRunner::Reset(const bool _all,
+  const bool _time, const bool _model)
+{
+  WorldControl control;
+  std::lock_guard<std::mutex> lock(this->msgBufferMutex);
+  control.rewind = _all || _time;
+  if (_model)
+  {
+    gzwarn << "Model reset not supported" <<std::endl;
+  }
+  this->worldControls.push_back(control);
 }

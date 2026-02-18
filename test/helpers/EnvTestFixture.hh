@@ -22,6 +22,7 @@
 #include <gz/common/Console.hh>
 #include <gz/common/Filesystem.hh>
 #include <gz/common/Util.hh>
+#include <gz/common/testing/TestPaths.hh>
 #include "test_config.hh"
 
 using namespace gz;
@@ -47,13 +48,15 @@ class InternalFixture : public TestType
   // Documentation inherited
   protected: void TearDown() override
   {
+    // Clean up fake home directory so that subsequent tests run on a clean slate.
+    common::removeAll(this->kFakeHome);
     // Restore $HOME
     EXPECT_TRUE(common::setenv(GZ_HOMEDIR, this->realHome.c_str()));
   }
 
   /// \brief Directory to act as $HOME for tests
-  public: const std::string kFakeHome = common::joinPaths(PROJECT_BINARY_PATH,
-      "test", "fake_home");
+  public: const std::string kFakeHome = common::testing::TempPath("test",
+      "fake_home");
 
   /// \brief Store user's real $HOME to set it back at the end of tests.
   public: std::string realHome;

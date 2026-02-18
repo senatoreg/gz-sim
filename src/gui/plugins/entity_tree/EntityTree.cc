@@ -122,6 +122,15 @@ TreeModel::TreeModel() : QStandardItemModel()
 }
 
 /////////////////////////////////////////////////
+TreeModel::~TreeModel()
+{
+  // Disconnect all signals/slots manually. This prevents Qt from printing
+  // warnings when closing the plugin as it tries to disconnect signals/slots
+  // from the (already deleted) model.
+  this->disconnect();
+}
+
+/////////////////////////////////////////////////
 void TreeModel::AddEntity(Entity _entity, const QString &_entityName,
     Entity _parentEntity, const QString &_type)
 {
@@ -293,7 +302,7 @@ EntityTree::EntityTree()
 {
   // Connect model
   gz::gui::App()->Engine()->rootContext()->setContextProperty(
-     "EntityTreeModel", &this->dataPtr->treeModel);
+     "_EntityTreeModel", &this->dataPtr->treeModel);
 }
 
 /////////////////////////////////////////////////
@@ -485,8 +494,8 @@ void EntityTree::OnLoadMesh(const QString &_mesh)
 
     if (!common::MeshManager::Instance()->IsValidFilename(meshStr))
     {
-      QString errTxt = QString::fromStdString("Invalid URI: " + meshStr +
-        "\nOnly mesh file types DAE, OBJ, and STL are supported.");
+      gzerr << "Invalid URI: " << meshStr <<
+        "\nOnly mesh file types DAE, OBJ, and STL are supported.\n";
       return;
     }
 
@@ -519,7 +528,10 @@ void EntityTree::OnLoadMesh(const QString &_mesh)
     gz::gui::App()->sendEvent(
         gz::gui::App()->findChild<gz::gui::MainWindow *>(),
         &event);
-
+  }
+  else
+  {
+    gzerr << meshStr << " should be local file\n";
   }
 }
 
